@@ -38,27 +38,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [initialized, setInitialized] = useState(false);
 
-  // Clean up any Supabase-related storage
-  const clearSupabaseStorage = () => {
-    // Clear all localStorage items that might contain Supabase data
+  // Clear Supabase storage
+  const clearAuthStorage = () => {
+    // Clear specific Supabase localStorage items
     Object.keys(localStorage).forEach(key => {
       if (key.includes('supabase') || key.includes('sb-')) {
         localStorage.removeItem(key);
       }
     });
     
-    // Clear specific items
-    localStorage.removeItem('sb-uyhlvjkcagzihzngttei-auth-token');
-    localStorage.removeItem('supabase.auth.token');
-    localStorage.removeItem('last_auth_time');
-    localStorage.removeItem('user_role');
-    localStorage.removeItem('user_email');
-    
     // Clear sessionStorage
     sessionStorage.clear();
   };
 
-  // Robust Profile Fetcher
+  // Get user with role details
   const getUserWithRole = useCallback(async (baseUser: User): Promise<UserWithRole | null> => {
     try {
       const { data: profile, error: profileError } = await supabase
@@ -81,7 +74,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         cloudinary_public_id: profile?.cloudinary_public_id
       };
 
-      // Fetch role details
+      // Fetch additional role details
       try {
         if (role === "student") {
           const { data } = await supabase.from('students').select('*').eq('user_id', baseUser.id).maybeSingle();
@@ -101,18 +94,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  // Initialize auth - SIMPLIFIED VERSION
+  // Initialize auth
   useEffect(() => {
     let mounted = true;
 
     const initializeAuth = async () => {
       try {
-        // First, check if there's a valid session
+        setLoading(true);
+        
+        // First check for existing session
         const { data: { session: localSession }, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError || !localSession) {
-          // No valid session
-          clearSupabaseStorage();
+          // No session found
           if (mounted) {
             setUser(null);
             setSession(null);
@@ -122,11 +116,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
-        // Verify the user is still valid
+        // Verify the session is still valid
         const { data: { user: validUser }, error: verifyError } = await supabase.auth.getUser();
 
         if (verifyError || !validUser) {
-          clearSupabaseStorage();
+          clearAuthStorage();
           if (mounted) {
             setUser(null);
             setSession(null);
@@ -148,7 +142,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } catch (error) {
         console.error("Auth initialization error:", error);
         if (mounted) {
-          clearSupabaseStorage();
+          clearAuthStorage();
           setUser(null);
           setSession(null);
           setLoading(false);
@@ -157,7 +151,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
     };
 
-    // Add a small delay to prevent race conditions
+    // Delay initialization slightly to avoid race conditions
     const timer = setTimeout(() => {
       initializeAuth();
     }, 100);
@@ -174,7 +168,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.log('Auth state change:', event);
       
       if (event === 'SIGNED_OUT' || !newSession) {
-        clearSupabaseStorage();
+        clearAuthStorage();
         setUser(null);
         setSession(null);
         setLoading(false);
@@ -197,9 +191,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signIn = async (email: string, password: string, rememberMe = true) => {
     setLoading(true);
     try {
-      // Clear any existing auth data before signing in
-      clearSupabaseStorage();
-      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -207,19 +198,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (error) throw error;
       
-      if (data.user) {
-        const detailedUser = await getUserWithRole(data.user);
-        setUser(detailedUser);
-        setSession(data.session);
-        showSuccess("Logged in successfully");
-        
-        // Redirect to home page
+      // Don't set user/session here - let onAuthStateChange handle it
+      showSuccess("Logged in successfully");
+      
+      // IMPORTANT: Wait a moment for state to update, then redirect
+      setTimeout(() => {
         window.location.href = '/';
-      }
+      }, 100);
+      
     } catch (error: any) {
       console.error('Sign in error:', error);
       showError(error.message || "Login failed");
-      clearSupabaseStorage();
       setLoading(false);
     }
   };
@@ -228,16 +217,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     try {
       await supabase.auth.signOut();
-      clearSupabaseStorage();
+      clearAuthStorage();
       setUser(null);
       setSession(null);
       showSuccess("Logged out successfully");
       
-      // Redirect to login with a clean state
+      // Redirect to login
       window.location.href = '/login';
     } catch (error: any) {
       console.error('Sign out error:', error);
-      clearSupabaseStorage();
+      clearAuthStorage();
       setUser(null);
       setSession(null);
       window.location.href = '/login';
