@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthForm from "@/components/AuthForm";
@@ -8,14 +10,16 @@ import { z } from "zod";
 import { authFormSchema } from "@/components/AuthForm"; // Import the schema
 
 const Login = () => {
-  const { signIn, loading, user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
 
-  React.useEffect(() => {
-    if (user) {
-      navigate("/"); // Redirect to dashboard if already logged in
+  useEffect(() => {
+    // If already logged in, redirect to home
+    if (user && !loading) {
+      console.log('User already logged in, redirecting to home');
+      navigate('/', { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, loading, navigate]);
 
   const handleSubmit = async (values: z.infer<typeof authFormSchema>) => {
     // Pass email, password, and rememberMe to signIn
