@@ -25,7 +25,7 @@ interface AuthContextType {
   user: UserWithRole | null;
   session: Session | null;
   loading: boolean;
-  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -36,166 +36,122 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<UserWithRole | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [authInitialized, setAuthInitialized] = useState(false);
-
-  // Clear all Supabase storage
-  const clearSupabaseStorage = () => {
-    console.log("Clearing Supabase storage...");
-    
-    // Clear all localStorage items
-    Object.keys(localStorage).forEach(key => {
-      if (key.includes('supabase') || key.includes('sb-') || key.includes('auth')) {
-        localStorage.removeItem(key);
-      }
-    });
-    
-    // Clear sessionStorage
-    sessionStorage.clear();
-    
-    // Clear any Supabase-related cookies
-    document.cookie.split(";").forEach(function(c) {
-      const cookieName = c.split("=")[0].trim();
-      if (cookieName.includes('supabase') || cookieName.includes('sb-')) {
-        document.cookie = cookieName + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT;path=/";
-      }
-    });
-  };
+  const [initialized, setInitialized] = useState(false);
 
   // Get user with role details
   const getUserWithRole = useCallback(async (baseUser: User): Promise<UserWithRole | null> => {
     try {
-      console.log("Fetching user profile for:", baseUser.id);
-      
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role, name, avatar_url, cloudinary_public_id')
         .eq('id', baseUser.id)
-        .maybeSingle();
+        .single();
 
       if (profileError) {
         console.error('Profile fetch error:', profileError);
-        return null;
+        return { ...baseUser, role: 'student', name: baseUser.email };
       }
 
-      const role = profile?.role || 'student';
-      const userWithRole: UserWithRole = { 
+      let userWithRole: UserWithRole = { 
         ...baseUser, 
-        role, 
+        role: profile?.role || 'student', 
         name: profile?.name || baseUser.email,
         avatar_url: profile?.avatar_url,
         cloudinary_public_id: profile?.cloudinary_public_id
       };
 
-      console.log("Base user role:", role);
-
-      // Fetch additional role details if needed
+      // Try to fetch additional role details
       try {
-        if (role === "student") {
-          const { data } = await supabase.from('students').select('*').eq('user_id', baseUser.id).maybeSingle();
-          if (data) {
-            Object.assign(userWithRole, data);
-          }
-        } else if (role === "faculty") {
-          const { data } = await supabase.from('faculty').select('*').eq('user_id', baseUser.id).maybeSingle();
-          if (data) {
-            Object.assign(userWithRole, data);
-          }
+        if (userWithRole.role === "student") {
+          const { data } = await supabase.from('students').select('*').eq('user_id', baseUser.id).single();
+          if (data) Object.assign(userWithRole, data);
+        } else if (userWithRole.role === "faculty") {
+          const { data } = await supabase.from('faculty').select('*').eq('user_id', baseUser.id).single();
+          if (data) Object.assign(userWithRole, data);
         }
       } catch (err) {
-        console.error('Role details fetch error:', err);
+        console.warn('Role details fetch error:', err);
       }
 
       return userWithRole;
     } catch (error) {
       console.error('getUserWithRole error:', error);
-      return null;
+      return { ...baseUser, role: 'student', name: baseUser.email };
     }
   }, []);
 
-  // Initialize auth - SIMPLE AND RELIABLE
+  // Initialize auth - SIMPLE VERSION
   useEffect(() => {
     let mounted = true;
-    let initialized = false;
 
     const initializeAuth = async () => {
-      if (initialized) return;
-      initialized = true;
-
       try {
-        console.log("Starting auth initialization...");
+        console.log("Initializing auth...");
         
-        // First, check for existing session
+        // Get current session
         const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
 
         if (sessionError) {
           console.error("Session error:", sessionError);
-          clearSupabaseStorage();
           if (mounted) {
             setUser(null);
             setSession(null);
             setLoading(false);
-            setAuthInitialized(true);
+            setInitialized(true);
           }
           return;
         }
 
-        console.log("Current session found:", !!currentSession);
+        console.log("Session found:", !!currentSession);
 
         if (!currentSession) {
-          // No session found
+          // No session
           if (mounted) {
             setUser(null);
             setSession(null);
             setLoading(false);
-            setAuthInitialized(true);
+            setInitialized(true);
           }
           return;
         }
 
-        // Verify session is still valid
+        // Validate user
         const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
 
         if (userError || !currentUser) {
           console.error("User validation error:", userError);
-          clearSupabaseStorage();
           if (mounted) {
             setUser(null);
             setSession(null);
             setLoading(false);
-            setAuthInitialized(true);
+            setInitialized(true);
           }
           return;
         }
 
-        console.log("User validated, fetching details...");
-
         // Get user details
         const detailedUser = await getUserWithRole(currentUser);
         
-        if (!detailedUser) {
-          console.error("Failed to get user details");
-          clearSupabaseStorage();
-        }
-
         if (mounted) {
           setSession(currentSession);
           setUser(detailedUser);
           setLoading(false);
-          setAuthInitialized(true);
-          console.log("Auth initialization complete");
+          setInitialized(true);
+          console.log("Auth initialized with user:", detailedUser?.email);
         }
 
       } catch (error) {
         console.error("Auth initialization error:", error);
         if (mounted) {
-          clearSupabaseStorage();
           setUser(null);
           setSession(null);
           setLoading(false);
-          setAuthInitialized(true);
+          setInitialized(true);
         }
       }
     };
+
+    initializeAuth();
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
@@ -203,43 +159,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       
       if (!mounted) return;
 
-      if (event === 'SIGNED_OUT' || !newSession) {
-        clearSupabaseStorage();
+      if (event === 'SIGNED_OUT') {
         setUser(null);
         setSession(null);
         setLoading(false);
         return;
       }
 
-      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+      if (event === 'SIGNED_IN' && newSession) {
         setSession(newSession);
-        
-        // Get user details
         const detailedUser = await getUserWithRole(newSession.user);
         setUser(detailedUser);
         setLoading(false);
       }
-    });
 
-    // Start initialization with a small delay
-    const timer = setTimeout(() => {
-      initializeAuth();
-    }, 100);
+      if (event === 'TOKEN_REFRESHED' && newSession) {
+        setSession(newSession);
+      }
+    });
 
     return () => {
       mounted = false;
-      clearTimeout(timer);
       subscription.unsubscribe();
     };
   }, [getUserWithRole]);
 
-  const signIn = async (email: string, password: string, rememberMe = true) => {
+  const signIn = async (email: string, password: string) => {
     setLoading(true);
     try {
-      console.log("Attempting sign in for:", email);
-      
-      // Clear any existing storage before login
-      clearSupabaseStorage();
+      console.log("Signing in...", email);
       
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -251,20 +199,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw error;
       }
       
-      console.log("Sign in successful, user:", data.user?.email);
-      
-      // Show success message
+      console.log("Sign in successful");
       showSuccess("Logged in successfully");
       
-      // IMPORTANT: Don't set state here - let onAuthStateChange handle it
-      // Just wait a moment and redirect
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 100);
+      // Auth state will be updated via onAuthStateChange
+      // Redirect will happen in ProtectedRoute or useEffect
       
     } catch (error: any) {
       console.error('Sign in error:', error);
       showError(error.message || "Login failed");
+      throw error;
+    } finally {
       setLoading(false);
     }
   };
@@ -272,18 +217,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signOut = async () => {
     setLoading(true);
     try {
-      console.log("Signing out...");
       await supabase.auth.signOut();
-      clearSupabaseStorage();
       setUser(null);
       setSession(null);
       showSuccess("Logged out successfully");
-      
-      // Redirect to login
       window.location.href = '/login';
     } catch (error: any) {
       console.error('Sign out error:', error);
-      clearSupabaseStorage();
       setUser(null);
       setSession(null);
       window.location.href = '/login';
@@ -308,7 +248,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const value = {
     user,
     session,
-    loading: loading || !authInitialized,
+    loading: loading || !initialized,
     signIn,
     signOut,
     refreshUser,
