@@ -104,17 +104,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return hoursSinceExpiry > 24; // Consider stale if expired more than 24 hours ago
   };
 
-  // Get user with role details
+  // Get user with role details - FIXED: Use .maybeSingle() instead of .single()
   const getUserWithRole = useCallback(async (baseUser: User): Promise<UserWithRole | null> => {
     try {
+      console.log("Fetching user profile for ID:", baseUser.id);
+      
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('role, name, avatar_url, cloudinary_public_id')
         .eq('id', baseUser.id)
-        .single();
+        .maybeSingle(); // Changed from .single() to .maybeSingle()
 
       if (profileError) {
         console.error('Profile fetch error:', profileError);
+        // Return basic user if profile doesn't exist
+        return { ...baseUser, role: 'student', name: baseUser.email };
+      }
+
+      // If no profile found, create a basic one
+      if (!profile) {
+        console.warn('No profile found for user, creating basic profile');
         return { ...baseUser, role: 'student', name: baseUser.email };
       }
 
@@ -126,19 +135,46 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         cloudinary_public_id: profile?.cloudinary_public_id
       };
 
-      // Try to fetch additional role details
+      // Try to fetch additional role details - FIXED: Use .maybeSingle() and handle errors
       try {
         if (userWithRole.role === "student") {
-          const { data } = await supabase.from('students').select('*').eq('user_id', baseUser.id).single();
-          if (data) Object.assign(userWithRole, data);
+          console.log("Fetching student details for user ID:", baseUser.id);
+          const { data, error } = await supabase
+            .from('students')
+            .select('*')
+            .eq('user_id', baseUser.id)
+            .maybeSingle(); // Changed from .single() to .maybeSingle()
+          
+          if (error) {
+            console.error('Error fetching student profile:', error);
+          } else if (data) {
+            console.log("Student data found:", data);
+            Object.assign(userWithRole, data);
+          } else {
+            console.warn('No student record found for user ID:', baseUser.id);
+          }
         } else if (userWithRole.role === "faculty") {
-          const { data } = await supabase.from('faculty').select('*').eq('user_id', baseUser.id).single();
-          if (data) Object.assign(userWithRole, data);
+          console.log("Fetching faculty details for user ID:", baseUser.id);
+          const { data, error } = await supabase
+            .from('faculty')
+            .select('*')
+            .eq('user_id', baseUser.id)
+            .maybeSingle(); // Changed from .single() to .maybeSingle()
+          
+          if (error) {
+            console.error('Error fetching faculty profile:', error);
+          } else if (data) {
+            console.log("Faculty data found:", data);
+            Object.assign(userWithRole, data);
+          } else {
+            console.warn('No faculty record found for user ID:', baseUser.id);
+          }
         }
       } catch (err) {
         console.warn('Role details fetch error:', err);
       }
 
+      console.log("Final userWithRole object:", userWithRole);
       return userWithRole;
     } catch (error) {
       console.error('getUserWithRole error:', error);
@@ -195,6 +231,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           return;
         }
 
+        console.log("User validated, fetching details...");
+        
         // Session is valid, get user details
         const detailedUser = await getUserWithRole(currentUser);
         
@@ -355,7 +393,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   );
 };
 
-// ✅ Make sure this export exists
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) throw new Error('useAuth must be used within an AuthProvider');
