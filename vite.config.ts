@@ -92,12 +92,11 @@ export default defineConfig(({ mode }) => {
                 },
               },
               // For navigation requests (HTML pages), use NetworkOnly to avoid caching auth state
+              // NetworkOnly doesn't support networkTimeoutSeconds, so we handle timeout differently
               {
                 urlPattern: ({ request }) => request.mode === "navigate",
                 handler: "NetworkOnly",
-                options: {
-                  networkTimeoutSeconds: 5,
-                },
+                // Remove options object since NetworkOnly doesn't support networkTimeoutSeconds
               },
               // Cache static assets with CacheFirst strategy
               {
@@ -120,6 +119,18 @@ export default defineConfig(({ mode }) => {
                   expiration: {
                     maxEntries: 10,
                     maxAgeSeconds: 60 * 60 * 24 * 365, // 1 year
+                  },
+                },
+              },
+              // Handle images with CacheFirst
+              {
+                urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp)$/,
+                handler: "CacheFirst",
+                options: {
+                  cacheName: "images",
+                  expiration: {
+                    maxEntries: 200,
+                    maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
                   },
                 },
               },
