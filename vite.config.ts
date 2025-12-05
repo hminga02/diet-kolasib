@@ -13,7 +13,7 @@ export default defineConfig(() => {
     plugins: [
       dyadComponentTagger(),
       react(),
-      // REMOVED PWA plugin temporarily to fix auth issues
+      // NO PWA PLUGIN - completely disabled
     ],
 
     resolve: {
@@ -21,5 +21,17 @@ export default defineConfig(() => {
         "@": path.resolve(__dirname, "./src"),
       },
     },
+    
+    // Prevent any service worker generation
+    build: {
+      rollupOptions: {
+        output: {
+          // Remove any service worker references
+          entryFileNames: 'assets/[name]-[hash].js',
+          chunkFileNames: 'assets/[name]-[hash].js',
+          assetFileNames: 'assets/[name]-[hash].[ext]'
+        }
+      }
+    }
   };
 });
