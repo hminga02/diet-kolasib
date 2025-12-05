@@ -86,6 +86,7 @@ export default defineConfig(({ mode }) => {
 
           workbox: {
             cleanupOutdatedCaches: true,
+            swSrc: 'public/custom-sw.js', // Add this line
             skipWaiting: false, // Don't skip waiting - let user control
             clientsClaim: false, // Don't claim clients immediately
             
