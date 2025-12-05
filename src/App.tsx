@@ -45,11 +45,84 @@ const queryClient = new QueryClient({
   },
 });
 
+// Custom service worker registration
+const registerServiceWorker = async () => {
+  if ('serviceWorker' in navigator && window.location.hostname !== 'localhost') {
+    try {
+      // Only register on authenticated pages (not login/forgot-password)
+      const isAuthPage = window.location.pathname === '/login' || 
+                         window.location.pathname === '/forgot-password' || 
+                         window.location.pathname === '/update-password';
+      
+      if (!isAuthPage) {
+        const registration = await navigator.serviceWorker.register('/sw.js', {
+          scope: '/',
+          updateViaCache: 'none', // Always check for updates
+        });
+        
+        console.log('Service Worker registered:', registration);
+        
+        // Listen for updates
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                console.log('New service worker available. Refresh to update.');
+                // You could show an update notification here
+              }
+            });
+          }
+        });
+        
+        return registration;
+      }
+    } catch (error) {
+      console.error('Service Worker registration failed:', error);
+    }
+  }
+};
+
+// Clean up service workers on auth pages
+const cleanupServiceWorkers = async () => {
+  if ('serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    for (const registration of registrations) {
+      await registration.unregister();
+    }
+    
+    // Clear caches
+    if ('caches' in window) {
+      const cacheNames = await caches.keys();
+      await Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+    }
+  }
+};
+
 const AppRoutes = () => {
   const { user, loading, forceClearStaleSession } = useAuth();
   const navigate = useNavigate();
   const [showReset, setShowReset] = useState(false);
   const [autoCleared, setAutoCleared] = useState(false);
+
+  // Register service worker when authenticated
+  useEffect(() => {
+    const initializeServiceWorker = async () => {
+      // Clean up on auth pages
+      if (window.location.pathname === '/login' || 
+          window.location.pathname === '/forgot-password') {
+        await cleanupServiceWorkers();
+        return;
+      }
+      
+      // Register on authenticated pages
+      if (user && !loading) {
+        await registerServiceWorker();
+      }
+    };
+    
+    initializeServiceWorker();
+  }, [user, loading]);
 
   // Auto-clear stale session after 3 seconds if still loading
   useEffect(() => {
@@ -89,6 +162,7 @@ const AppRoutes = () => {
             onClick={() => {
               localStorage.clear();
               sessionStorage.clear();
+              cleanupServiceWorkers();
               window.location.href = '/login';
             }}
             className="mt-4 px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
@@ -158,24 +232,19 @@ const AppRoutes = () => {
 };
 
 const App = () => {
-  // Clear any existing service workers on app start
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(registrations => {
-        registrations.forEach(registration => {
-          registration.unregister();
-        });
-      });
-    }
+    // Clean up any existing service workers on app start
+    const cleanupOnStart = async () => {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        for (const registration of registrations) {
+          // Keep only the latest service worker
+          registration.update();
+        }
+      }
+    };
     
-    // Clear caches
-    if ('caches' in window) {
-      caches.keys().then(cacheNames => {
-        cacheNames.forEach(cacheName => {
-          caches.delete(cacheName);
-        });
-      });
-    }
+    cleanupOnStart();
   }, []);
 
   return (
