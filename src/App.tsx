@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 import AdminDashboard from "./pages/AdminDashboard";
 import NotFound from "./pages/NotFound";
@@ -38,8 +38,8 @@ import { useAuth } from "./context/AuthContext";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 2 * 60 * 1000,
-      gcTime: 5 * 60 * 1000,
+      staleTime: 5 * 60 * 1000,
+      gcTime: 10 * 60 * 1000,
       retry: 1,
     },
   },
@@ -49,16 +49,16 @@ const queryClient = new QueryClient({
 const fullCleanup = () => {
   console.log("Performing full cleanup...");
   
-  // 1. Clear all storage
+  // Clear all storage
   localStorage.clear();
   sessionStorage.clear();
   
-  // 2. Clear all cookies
+  // Clear cookies
   document.cookie.split(";").forEach(function(c) {
     document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
   });
   
-  // 3. Unregister all service workers
+  // Clear service workers
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(registrations => {
       registrations.forEach(registration => {
@@ -67,22 +67,11 @@ const fullCleanup = () => {
     });
   }
   
-  // 4. Clear all caches
+  // Clear caches
   if ('caches' in window) {
     caches.keys().then(cacheNames => {
       cacheNames.forEach(cacheName => {
         caches.delete(cacheName);
-      });
-    });
-  }
-  
-  // 5. Clear IndexedDB
-  if (window.indexedDB) {
-    window.indexedDB.databases().then((databases) => {
-      databases.forEach((db) => {
-        if (db.name) {
-          window.indexedDB.deleteDatabase(db.name);
-        }
       });
     });
   }
@@ -93,62 +82,46 @@ const fullCleanup = () => {
 
 const AppRoutes = () => {
   const { user, loading } = useAuth();
+  const navigate = useNavigate();
   const [showReset, setShowReset] = useState(false);
-  const [debugInfo, setDebugInfo] = useState<string>('');
 
+  // Auto-redirect if not logged in
   useEffect(() => {
-    // Log debug info
-    const info = `
-      Loading: ${loading}
-      User: ${user ? `Exists (${user.email})` : 'null'}
-      Path: ${window.location.pathname}
-      Has localStorage: ${Object.keys(localStorage).length > 0}
-      Supabase keys: ${Object.keys(localStorage).filter(k => k.includes('supabase') || k.includes('sb-')).join(', ')}
-    `;
-    setDebugInfo(info);
-    console.log('Auth State:', info);
+    if (!loading && !user && window.location.pathname === '/') {
+      navigate('/login');
+    }
+  }, [user, loading, navigate]);
 
-    // Show reset button after 2 seconds if still loading
+  // Show reset button after 3 seconds
+  useEffect(() => {
     const timer = setTimeout(() => {
       if (loading) {
         setShowReset(true);
       }
-    }, 2000);
+    }, 3000);
     
     return () => clearTimeout(timer);
-  }, [loading, user]);
+  }, [loading]);
 
-  // If loading, show simple loading screen
+  // Show loading state
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-background p-4">
-        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-lg font-medium mb-2">Loading application...</p>
-        
-        {/* Debug info */}
-        <div className="mt-4 p-4 bg-gray-100 rounded-lg text-sm font-mono max-w-lg w-full">
-          <p className="font-bold mb-2">Debug Info:</p>
-          <pre className="whitespace-pre-wrap">{debugInfo}</pre>
-        </div>
+      <div className="flex flex-col items-center justify-center min-h-screen bg-background">
+        <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 text-lg text-muted-foreground">Loading application...</p>
         
         {showReset && (
-          <div className="mt-6 space-y-3">
-            <button
-              onClick={fullCleanup}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
-            >
-              Full Reset (Clean Everything)
-            </button>
-            <p className="text-sm text-gray-500 text-center">
-              This will clear all data and redirect to login
-            </p>
-          </div>
+          <button
+            onClick={fullCleanup}
+            className="mt-4 px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 transition-colors"
+          >
+            Reset App State
+          </button>
         )}
       </div>
     );
   }
 
-  // Dashboard selector
   const DashboardSelector = () => {
     if (!user) {
       return null;
@@ -207,26 +180,24 @@ const AppRoutes = () => {
 };
 
 const App = () => {
-  // Initial cleanup on app start
+  // Cleanup service workers on app start
   useEffect(() => {
-    console.log("App starting - checking for stale service workers");
+    console.log("App starting - cleaning up service workers");
     
-    // Check if we have a clean parameter
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('clean') === '1') {
-      console.log("Clean parameter detected, removing from URL");
-      window.history.replaceState({}, '', '/');
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations.forEach(registration => {
+          registration.unregister();
+          console.log('Service worker unregistered');
+        });
+      });
     }
     
-    // Add debug function to window
-    (window as any).debugAuth = () => {
-      console.log('=== DEBUG ===');
-      console.log('LocalStorage:', localStorage);
-      console.log('SessionStorage:', sessionStorage);
-      console.log('Cookies:', document.cookie);
-    };
-    
-    (window as any).forceCleanup = fullCleanup;
+    // Check URL for clean parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('clean') === '1') {
+      window.history.replaceState({}, '', window.location.pathname);
+    }
   }, []);
 
   return (
